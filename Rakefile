@@ -74,3 +74,48 @@ task :preview do
 
   Jekyll::Commands::Serve.process(options)
 end
+
+task :real do
+  base = Pathname.new('.').expand_path
+  options = {
+    "source"        => base.join('').to_s,
+    "destination"   => base.join('_site').to_s,
+    "force_polling" => false,
+    "serving"       => true,
+    "theme"         => "minimal-mistakes-jekyll"
+  }
+
+  options = Jekyll.configuration(options)
+
+  ENV["LISTEN_GEM_DEBUGGING"] = "1"
+  listener = Listen.to(
+    base.join("_data"),
+    base.join("_includes"),
+    base.join("_layouts"),
+    base.join("_sass"),
+    base.join("assets"),
+    options["source"],
+    :ignore => listen_ignore_paths(base, options),
+    :force_polling => options['force_polling'],
+    &(listen_handler(base, options))
+  )
+
+  begin
+    listener.start
+    Jekyll.logger.info "Auto-regeneration:", "enabled for '#{options["source"]}'"
+
+    unless options['serving']
+      trap("INT") do
+        listener.stop
+        puts "     Halting auto-regeneration."
+        exit 0
+      end
+
+      loop { sleep 1000 }
+    end
+  rescue ThreadError
+    # You pressed Ctrl-C, oh my!
+  end
+
+  Jekyll::Commands::Serve.process(options)
+end
