@@ -201,9 +201,9 @@ And catch a shell as daniel.morgan:
 {% include figure image_path="/assets/img/caughtshell.png" %}
 The user.txt flag is then located in C:\Users\daniel.morgan\Desktop:
 {% include figure image_path="/assets/img/user.png"  %}
-Flag: HTB{Abu51ng_F34tur3s_4r3_fun}</br>
+Flag: HTB{Abu51ng_F34tur3s_4r3_fun}  <br/>
 ### Priv Esc
-Assuming that this is a domain controller, and the hints towards this using certificates, we can assume that this environment is configured with AD Certificate Services (AD CS) enabled. From this shell, we can run the tool Certify by SpectreOps located <a href=https://github.com/GhostPack/Certify>here</a> to check for vulnerable templates and gain information regarding the CA used. Certify.exe is run in memory from the meterpreter shell by running:
+Assuming that this is a domain controller, and the hints towards this using certificates, we can assume that this environment is configured with AD Certificate Services (AD CS) enabled. From this shell, we can run the tool Certify by SpectreOps located <a href="https://github.com/GhostPack/Certify">here </a> to check for vulnerable templates and gain information regarding the CA used. Certify.exe is run in memory from the meterpreter shell by running:
 {% highlight csharp %}
 run post/windows/manage/execute_dotnet_assembly DOTNET_EXE=/opt/Certify.exe ARGUMENTS="find /vulnerable"  PROCESS=dpapimig.exe
 {% endhighlight %}
