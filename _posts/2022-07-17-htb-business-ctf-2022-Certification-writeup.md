@@ -205,11 +205,11 @@ Flag: HTB{Abu51ng_F34tur3s_4r3_fun}</br>
 ### Priv Esc
 Assuming that this is a domain controller, and the hints towards this using certificates, we can assume that this environment is configured with AD Certificate Services (AD CS) enabled. From this shell, we can run the tool Certify by SpectreOps located <a href=https://github.com/GhostPack/Certify>here</a> to check for vulnerable templates and gain information regarding the CA used. Certify.exe is run in memory from the meterpreter shell by running:
 {% highlight csharp %}
-run post/windows/manage/execute_dotnet_assembly DOTNET_EXE=/opt/Certify.exe ARGUMENTS="find"  PROCESS=dpapimig.exe
+run post/windows/manage/execute_dotnet_assembly DOTNET_EXE=/opt/Certify.exe ARGUMENTS="find /vulnerable"  PROCESS=dpapimig.exe
 {% endhighlight %}
 {% include figure image_path="/assets/img/certify.png" %}
 Whilst Certify didn't find any ADCS templates we can abuse, it did tell us the name of the Enterprise CA (certification-CFN-SVRDC01-CA).
-CVE (CVE-2022–26923) can then be abused. This CVE allows domain compromise by obtaining the machine account hash for machines within an Active Directory domain. This is done by having a machine account with the dnshostname property on the machine set to an arbitrary machine host name within the domain, then requesting a certificate using this dnshostname and abusing PKinit to obtain the NTLM hash for the machine.
+CVE (CVE-2022–26923) can then be abused. This CVE allows domain compromise by obtaining the machine account hash for machines within an Active Directory domain. <br/>This is done by having a machine account with the dnshostname property on the machine set to an arbitrary machine host name within the domain, then requesting a certificate using this dnshostname and abusing PKinit to obtain the NTLM hash for the machine.
 Firstly, we need to add a new computer account by using Powermad.ps1 (https://github.com/Kevin-Robertson/Powermad). However when running PowerShell we find that AMSI is enabled:
 {% include figure image_path="/assets/img/amsi.png" %}
 So firstly we run an obfuscated AMSI bypass using the AmsiInitFailed method:
