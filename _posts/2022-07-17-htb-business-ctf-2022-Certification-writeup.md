@@ -5,9 +5,9 @@ last_modified_at: 2018-01-03T09:45:06-05:00
 header:
   teaser: "assets/images/markup-syntax-highlighting-teaser.jpg"
 tags: 
-  - c#
-  - NET
-  - shellcode
+  - HTB Business CTF 2022
+  - Certification Writeup
+  - ADCS
 toc: false
 classes: wide
 layout: single
@@ -209,7 +209,8 @@ run post/windows/manage/execute_dotnet_assembly DOTNET_EXE=/opt/Certify.exe ARGU
 {% endhighlight %}
 {% include figure image_path="/assets/img/certify.png" %}
 Whilst Certify didn't find any ADCS templates we can abuse, it did tell us the name of the Enterprise CA (certification-CFN-SVRDC01-CA).
-CVE (CVE-2022–26923) can then be abused. This CVE allows domain compromise by obtaining the machine account hash for machines within an Active Directory domain. <br/>This is done by having a machine account with the dnshostname property on the machine set to an arbitrary machine host name within the domain, then requesting a certificate using this dnshostname and abusing PKinit to obtain the NTLM hash for the machine.
+CVE (CVE-2022–26923) can then be abused. This CVE allows domain compromise by obtaining the machine account hash for machines within an Active Directory domain. <br/><br/>
+This is done by having a machine account with the dnshostname property on the machine set to an arbitrary machine host name within the domain, then requesting a certificate using this dnshostname and abusing PKinit to obtain the NTLM hash for the machine.
 Firstly, we need to add a new computer account by using Powermad.ps1 (https://github.com/Kevin-Robertson/Powermad). However when running PowerShell we find that AMSI is enabled:
 {% include figure image_path="/assets/img/amsi.png" %}
 So firstly we run an obfuscated AMSI bypass using the AmsiInitFailed method:
