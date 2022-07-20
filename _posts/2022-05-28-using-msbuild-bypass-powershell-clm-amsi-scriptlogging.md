@@ -164,7 +164,7 @@ This code will attempt to get a reference to the PSEtwLogProvider type (the type
 This code is run first, before performing the AMSI bypass, to ensure that ETW doesn't pick up on our AMSI bypass PowerShell command. When running this the executeable, you will now see that no new PowerShell log events can be viewed in EventViewer.
 
 ## Part 5 - Bypassing AppLocker
-At this point we have a .NET Assembly executeable that runs a fake PowerShell CLI  
+At this point we have a .NET Assembly executeable that runs a fake PowerShell CLI that allows us to bypass CLM, AMSI and Script Block logging. Next we want to build this into an AppLocker (or generic Application Whitelisting) bypass. For this I used the classic "MSBuild" bypass to run arbritrary C# source code. MSBuild is a Microsoft signed binary that exists on most versions on Windows, aka the Microsoft Build Engine, is used to compile projects (including C# projects). The details of how and what to compile, including the configuration settings can be specified by an XML file. Starting with Microsoft .NET Framework 4.0, this XML file can specify inline tasks. These are compilation tasks to perform when a project is being compiled, that are themselves defined as C# source code within the XML file (previiously the task would have to be a precompiled .NET Assembly DLL). This allows us to specify a task that contains our PowerShell CLI code, as C# code within an XML file that when MSBuild compiles our project it will instead run our CLI and never complete (until we exit our program). <br />
 ### GitHub link
 
 This has been combined into one POC on my GitHub, located <a href="https://github.com/ret2desync/SharpPowerShell"> here</a>
