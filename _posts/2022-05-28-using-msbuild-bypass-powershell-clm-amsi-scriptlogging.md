@@ -28,6 +28,7 @@ For years attackers have been using the power of PowerShell to perform various u
 $ExecutionContext.SessionState.LanguageMode
 {% endhighlight %}
 If it says "ConstrainedLanguage" then CLM is enabled, otherwise it will say state "FullLanguage".
+One method of enabling CLM system wide, is to set the environment variable __PSLockDownPolicy to 4. Doing this will enable CLM for everyone (including Administrators).
 ### AMSI 
 Anti-Malware Scan Interface (AMSI) is a Windows interface that allows applications to connect to Anti-Virus soutions. In PowerShell, AMSI is used to scan every command before it is run, to check if it contains known malicious content. This stops us from being able to download and run known malicious PowerShell scripts in memory without bypassing it.<br/><br/>
 ### ETW
@@ -92,7 +93,7 @@ In case this operation of running a command, and printing its output runs into a
 After the command has run (or exception caught) we need to remove the commands/scripts we added before (the Invoke method doesn't remove the added commands/scripts) otherwise we will rerun every previous command whenever Invoke is called. <br/><br/>
 To compile the above, you will need to add a reference to the C:\Windows\assembly\GAC_MSIL\System.Management.Automation\1.0.0.0__31bf3856ad364e35\System.Management.Automation.dll .NET assembly.
 Once compiled, and run we obtain a PowerShell CLI clone:
-
+{% include figure image_path="/assets/img/sharppowershelllinit.png" alt="" caption="" %}
 ## Part 2 - Defeating CLM via Custom Runspaces 
 In PowerShell, each "session" has at least one Runspace. A Runspace is a container for the variables, scripts run and is what is responsible for running PowerShell commands. The PowerShell object is responsible for collecting commands, then sending it to its created and assigned Runspace, which will return output, that the PowerShell object returns. A PowerShell instance can have multiple Runspaces (called Runspace Pool) which allows multithreaded execution. For us the important thing to note is that when we say PowerShell has Constrained Language Mode set, we mean that the Runspace being used by the PowerShell instance has Constrained Language Mode set. When we set Constrained Language Mode on a machine/user, we are saying that when powershell.exe is used, a PowerShell object and the Runspace created is set to Constrained Language. When we create our own instance of PowerShell, the Runspace may or may not have Constrained Language Mode set on it during creation.<br/><br/>
 Looking at our example we can see Constrained Language Mode is not set on our PowerShell instance by replacing the first line of the program with:
@@ -111,10 +112,59 @@ PowerShell ps = PowerShell.Create();
 ps.Runspace = rs; 
 {% endhighlight %}
 ## Part 3 - Defeating AMSI 
-When we run the program, and try to download PowerView.ps1 into memory, AMSI flags it as malware and makes it unuseable, as can be seen below.
+When we run the program, and try to download PowerView.ps1 into memory, AMSI flags it as malware and makes it unuseable, as can be seen below:
+{% include figure image_path="/assets/img/sharppowershellamsi.png" alt="" caption="" %}
+Therefore for this to be useful, we will need to bypass AMSI. To do this, I used an obfuscated version of the "amsiInitFailed" set to true method. This method was original discovered by <a href="https://twitter.com/mattifestation">Matt Graeber</a>. This method of disabling AMSI is performed by setting a specific variable located in the loaded .NET assembly class System.Management.Automation.AmsiUtils, which is responsible for intializing and utilising AMSI in PowerShell. Within this class, there exists a static variable called "amsiInitFailed", which is a variable that stores a boolean value stating whether AMSI was successfully initialized (as the first step of using AMSI is to obtain an AMSI context, which is done by calling AmsiInitialize within the AMSI dll amsi.dll). If this variable is true, then PowerShell will no longer send commands to be checked by AMSI, as it assumes that the AMSI initialization step failed. The original code obtains a reference to the System.Management.Automation.AmsiUtils type (class), gets a reference to the field (variable) amsiInitFailed and sets its value to true:
+{% highlight csharp %}
+[Ref].Assembly.GetType('System.Management.Automation.AmsiUtils').GetField('amsiInitFailed','NonPublic,Static').SetValue($null,$true)
+{% endhighlight %}
+Unsurprisingly, this command is now blocked by AMSI, so a varation of this is used (one that doesn't contain the string 'AmsiUtils' or 'amsiInitFailed'):
+{% highlight csharp %}
+$a=[Ref].Assembly.GetTypes(); Foreach($b in $a) {if ($b.Name -like "*Ut*s") {$c=$b; break}};$d=$c.GetFields('NonPublic,Static'); Foreach($e in $d) {if ($e.Name -like "*Init*") {$e.SetValue($null, $true)}} 
+{% endhighlight %}
+What this command does, is iterate over all loaded types, checks if its name follows the format _something_Ut_something_s, which only AmsiUtils matches (in a default PowerShell install) and saves this to a variable ($c). With this type now stored, we iterate over all fields that are declared as NonPublic and Static (such as amsiInitFailed) and check if its name follows the format something_Init_something, which only amsiInitFailed matches. With any fields that match, set its value to "true". <br/>
+This command added to the PowerShell object and invoked before we read user input:
+{% highlight csharp %}
+String cmd = "$a=[Ref].Assembly.GetTypes();Foreach($b in $a) { if ($b.Name -clike \"A*U*s\") {$c =$b; break} };$d =$c.GetFields('NonPublic,Static');Foreach($e in $d) { if ($e.Name -like \"*Init*\") {$f =$e} };$f.SetValue($null, $true);"; 
+ps.AddScript(cmd); 
+ps.Invoke();
+{% endhighlight %}
+Now when we run the executeable, we are able to download and use PowerView.
+{% include figure image_path="/assets/img/sharppowershellnoamsi.png" alt="" caption="" %}
+## Part 4 - Defeating PowerShell Script Block Logging 
+When running commands in our PowerShell object, you can see events being generated via PowerShell Script Block Logging. For example, when importing PowerView and looking in EventViewer > Applications and Service Logs > Windows > PowerShell > Operational, we see an event has been generated showing the contents of PowerView and our AMSI bypass:
+{% include figure image_path="/assets/img/powerviewgettinglogged.png" alt="" caption="" %}
+{% include figure image_path="/assets/img/amsigettinglogged.png.png" alt="" caption="" %}
+Multiple AV/EDR products monitor such events, and can be used to identify potentially malicious activity occuring on this machine, so ideally we want to disable this. These events are a form of Event Tracing for Windows, where PowerShell has a registered ETW provider, that other applications may consume. We can see this by running the logman.exe command to list all ETW providers, and filter for ones containing PowerShell:
+{% highlight csharp %}
+c:\Windows\System32\logman.exe query providers | findstr PowerShell
+{% endhighlight %}
+{% include figure image_path="/assets/img/etwproviders.png" alt="" caption="" %}
+In the above screenshot, we see an ETW provider for PowerShell (Microsoft-Windows-PowerShell) and a GUID in curly braces next to it. This is the unique ID assigned to this particular ETW Provider. When an application wishes to write an event to a provider, it references it by the unique ID. Similarly, when reading events (acting as a consumer) the ID is used to reference which ETW Provider to read from (via a event tracing session). A consumer will use at least event tracing session, which is responsible for taking the events from a provider, and providing them to the consumer. To list these sessions, we can run the command as Administrator:
+{% highlight csharp %}
+logman query -ets
+{% endhighlight %}
+{% include figure image_path="/assets/img/etwsessions.png" alt="" caption="" %}
+This shows a tracing session for Windows EventLog Application (EventLog-Application). We can then run the following command to see what providers this tracing session is using:
+{% highlight csharp %}
 
+logman query "EventLog-Application" -ets
 
+{% endhighlight %}
+{% include figure image_path="/assets/img/etwtracesessionlog.png" alt="" caption="" %}
+In PowerShell, the ETW Provider ID is stored within the type System.Management.Automation.Tracing.EventProvider. This type is used by the type System.Management.Automation.Tracing.PSEtwLogProvider, within the etwProvider field. When PowerShell runs a command or script block that it believes should be noted, it will write to the ETW Provider specified by this field. To bypass ETW, we can set the value of the field etwProvider to an instance of type System.Management.Automation.Tracing.EventProvider, where the GUID set for the ETW provider is a randomly generated GUID. That way when the PSEtwLogProvider is used to send ETW events, it will use the etwProvider field containing a non-existent GUID and write to this non-existent provider. The code to do this is:
+{% highlight csharp %}
+var PSEtwLogProvider = ps.GetType().Assembly.GetType("System.Management.Automation.Tracing.PSEtwLogProvider"); 
+if (PSEtwLogProvider != null) { 
+    var EtwProvider = PSEtwLogProvider.GetField("etwProvider", BindingFlags.NonPublic | BindingFlags.Static); 
+    var EventProvider = new System.Diagnostics.Eventing.EventProvider(Guid.NewGuid()); EtwProvider.SetValue(null, EventProvider); 
+}
+{% endhighlight %}
+This code will attempt to get a reference to the PSEtwLogProvider type (the type that contains a field of type EventProvider, that contains the GUID of the PowerShell ETW provider). If successful then a reference to the field "etwProvider" is obtained. A new instance of type EventProvider is created, where we pass to it a newly created GUID which will contain an arbritrary GUID that does match any ETW Provider GUID (technically this may reference an existing one, but due to the sife of the GUID this is unlikely). With this new instance of EventProvider, we set the "etwProvider" field to this value. By doing this, when PowerShell writes ETW events, they will be written to a non-existent ETW Provider, effectively disappearing. <br/>
+This code is run first, before performing the AMSI bypass, to ensure that ETW doesn't pick up on our AMSI bypass PowerShell command. When running this the executeable, you will now see that no new PowerShell log events can be viewed in EventViewer.
 
+## Part 5 - Bypassing AppLocker
+At this point we have a .NET Assembly executeable that runs a fake PowerShell CLI  
 ### GitHub link
 
 This has been combined into one POC on my GitHub, located <a href="https://github.com/ret2desync/SharpPowerShell"> here</a>
